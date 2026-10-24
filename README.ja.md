@@ -64,7 +64,8 @@ GR III 2.20 と GR IIIx 1.70 は、2.10 と 1.60 と同じパッケージを使�
 - [GR III、GR IIIx とそれぞれの HDF モデル](resources/INSTALLATION.ja.md)
 - [GR IV、GR IV HDF、GR IV Monochrome](resources/INSTALLATION-GR4.ja.md)
 
-GRKit を削除するには、カメラの電源を切ってから、カードの `SCRIPT` フォルダーを削除します。
+GRKit をアップデートするには、新しいパッケージの `SD_ROOT` の中身をカードにコピーし、古いファイルを上書きします。設定とエフェクトは `GRKIT` に残ります。
+GRKit を削除するには、カメラの電源を切ってから、カードの `SCRIPT` フォルダーと `GRKIT` フォルダーを削除します。`GRKIT` には GRKit の設定が入っています。
 SD スクリプトの設定をオフにするには、[grkit.app](https://grkit.app) のインストール手順の下にあるファイルを使います。手順はインストールガイドにあります。
 
 ## ソースからのビルド

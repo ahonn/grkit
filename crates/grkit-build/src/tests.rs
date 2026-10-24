@@ -758,6 +758,17 @@ fn generated_header_matches_fixed_synthetic_contract() -> Result<()> {
     };
     validate_plan(&plan)?;
     let header = loader::header(&plan, &synthetic_gr3(), TEST_VERSION)?;
+    // The effects folder of the package is the inbox of the library in the
+    // data folder, which no package holds.
+    for line in [
+        "#define INBOX_PATH \"/media/storage1/SCRIPT/PLUGINS/EFFECTS\"",
+        "#define LIBRARY_PATH \"/media/storage1/GRKIT/EFFECTS\"",
+        "#define INDEX_PATH \"/media/storage1/GRKIT/EFFECTS.TXT\"",
+        "#define IMPORTED_PATH \"/media/storage1/GRKIT/IMPORTED.TXT\"",
+        "#define PACKAGE_PATH \"/media/storage1/SCRIPT/PLUGINS/PACKAGE.TXT\"",
+    ] {
+        assert!(header.lines().any(|l| l == line), "{line}");
+    }
     // The installer names its runtime build for the package check.
     assert!(header.starts_with(
         "static const char target_marker[] __attribute__((used)) = \"GRKIT_TARGET=gr3-2.10\";\n"
@@ -766,7 +777,7 @@ fn generated_header_matches_fixed_synthetic_contract() -> Result<()> {
     assert!(header.contains("#define RTOS_IDENTITY 0x53002038U\n#define RTOS_IDENTITY_COUNT 0U\n"));
     assert_eq!(
         sha256(header.as_bytes()),
-        "ba236cb1ec3f99bdb171de215fc10a876acf6f8266df7d526c42221d026c6c93"
+        "8cb94a5389484c9d662050f69bd632de960ea9df923890d7cbbb3713f5013e42"
     );
     Ok(())
 }
@@ -880,7 +891,7 @@ fn production_scripts_and_activation_match_fixed_contracts() {
         ),
         (
             "SCRIPT/PLUGINS/PLUGINS.TTL",
-            "bdd4f9ad1129a146d526a9e79087149ebb25c2ee9ebb49c156356680f1cd4a57",
+            "e3dcc2ca1a745d00952b6972300c9719d5de1879247eac271c1e51f4d93f9edf",
         ),
         (
             "SCRIPT/PLUGINS/INSTALL.BIN",

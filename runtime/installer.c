@@ -27,11 +27,17 @@ static long syscall6(u32 number, u32 a, u32 b, u32 c, u32 d, u32 e, u32 f)
     return (long)r0;
 }
 static volatile u8 *mapping;
-static u8 profiles[MAX_COUNT][GRKIT_GRF_MAX_SIZE], temporary[GRKIT_GRF_MAX_SIZE];
+/* One profile more than MAX_COUNT shows that the effects do not all fit.
+   `profiles` holds the effects of the package, then the selection; `others`
+   holds the other effects of the library. */
+static u8 profiles[MAX_COUNT + 1][GRKIT_GRF_MAX_SIZE], others[MAX_COUNT + 1][GRKIT_GRF_MAX_SIZE];
+static u8 temporary[GRKIT_GRF_MAX_SIZE];
 static u8 directory_entries[4096];
 static u8 plan[20 + MAX_COUNT * GRKIT_GRF_MAX_SIZE];
-static u32 count, size, icon_chunks;
-static const char root[] = EFFECTS_PATH;
+static u32 count, other_count, size, icon_chunks, overflow;
+static const char inbox_path[] = INBOX_PATH;
+static const char library_path[] = LIBRARY_PATH;
+static const char package_path[] = PACKAGE_PATH;
 static const char plan_path[] = PLAN_PATH;
 static const char plan_tmp[] = PLAN_TMP_PATH;
 static const char lock_path[] = LOCK_PATH;
@@ -65,21 +71,7 @@ static void number(u32 value)
 #include "catalog.h"
 #include "directory.h"
 #include "selection.h"
-static char names[MAX_COUNT][CATALOG_NAME_SIZE];
-static int read_file(const char *path, u8 *buffer, u32 wanted)
-{
-    long fd=syscall6(5,(u32)path,0x8800,0,0,0,0);
-    if(fd<0) return 0;
-    u32 have=0; long got=0;
-    while(have<wanted) {
-        got=syscall6(3,fd,(u32)(buffer+have),wanted-have,0,0,0);
-        if(got<=0) break;
-        have+=(u32)got;
-    }
-    u8 extra; got=syscall6(3,fd,(u32)&extra,1,0,0,0);
-    syscall6(6,fd,0,0,0,0,0);
-    return have==wanted && got==0;
-}
+static char names[MAX_COUNT + 1][CATALOG_NAME_SIZE], other_names[MAX_COUNT + 1][CATALOG_NAME_SIZE];
 /* A missing PLUGINS.TXT selects every plugin. An unreadable or invalid one
    stops the installation, so a card never installs what its file does not
    describe. */
@@ -125,33 +117,276 @@ static u32 read_effect(const char *path, u8 *buffer)
     if(got<0 || more!=0) return 0;
     return (have==GRKIT_GRF_SIZE || have==GRKIT_GRF_MAX_SIZE) ? have : 0;
 }
+/* A path in the inbox or the library: the longer folder, '/', an 8.3 name,
+   and NUL. */
+#define EFFECT_PATH_SIZE ((sizeof(inbox_path) > sizeof(library_path) ? sizeof(inbox_path) \
+                          : sizeof(library_path)) + CATALOG_NAME_SIZE)
+/* Write `folder`/`name` into `path`. Return 0 if it does not fit in `size`
+   bytes. */
+static int join(char *path, u32 size, const char *folder, const char *name)
+{
+    u32 prefix=length(folder), n=length(name);
+    if(prefix+n+2>size) return 0;
+    copy((u8 *)path,(const u8 *)folder,prefix); path[prefix++]='/';
+    copy((u8 *)path+prefix,(const u8 *)name,n+1);
+    return 1;
+}
+/* The most names that one folder or list gives. */
+#define NAMES_MAX 64U
+/* PACKAGE.TXT names the effect files of the last package, separated by ASCII
+   whitespace. They install before the other effects of the library, so
+   effects that an earlier package left cannot take their places. */
+#define PACKAGE_FILE_MAX 1024U
+static char listed[NAMES_MAX][CATALOG_NAME_SIZE];
+static u32 listed_count;
+static int same_name(const char *a, const char *b)
+{
+    for(;;) {
+        char x=*a++, y=*b++;
+        if(x>='a' && x<='z') x-=32;
+        if(y>='a' && y<='z') y-=32;
+        if(x!=y) return 0;
+        if(!x) return 1;
+    }
+}
+/* Read `path` into `buffer`. Return its size, or -1 for a missing file, a
+   read error, or a file larger than `max` bytes. */
+static long read_text(const char *path, u8 *buffer, u32 max)
+{
+    long fd=syscall6(5,(u32)path,0x8800,0,0,0,0);
+    if(fd<0) return -1;
+    u32 have=0; long got=0; u8 extra;
+    while(have<max && (got=syscall6(3,fd,(u32)(buffer+have),max-have,0,0,0))>0) have+=(u32)got;
+    if(have==max) got=syscall6(3,fd,(u32)&extra,1,0,0,0);
+    syscall6(6,fd,0,0,0,0,0);
+    return got<0 || (have==max && got>0) ? -1 : (long)have;
+}
+static void read_package_list(void)
+{
+    static u8 text[PACKAGE_FILE_MAX];
+    listed_count=0;
+    long have=read_text(package_path,text,sizeof(text));
+    for(long i=0;i<have;) {
+        while(i<have && selection_space(text[i])) ++i;
+        long start=i;
+        while(i<have && !selection_space(text[i])) ++i;
+        u32 n=(u32)(i-start);
+        if(n && n<CATALOG_NAME_SIZE && catalog_name((const char *)text+start,n) && listed_count<NAMES_MAX) {
+            copy((u8 *)listed[listed_count],text+start,n);
+            listed[listed_count++][n]=0;
+        }
+    }
+}
+static int is_listed(const char *name)
+{
+    for(u32 i=0;i<listed_count;++i) if(same_name(listed[i],name)) return 1;
+    return 0;
+}
+/* Offer the effect in `path`, under its file name `name`. */
+static void offer_path(const char *path, const char *name)
+{
+    u32 size=read_effect(path,temporary);
+    if(!size || !valid_profile(temporary,size)) return;
+    if(is_listed(name)) count=catalog_offer(profiles,names,count,MAX_COUNT + 1,temporary,name);
+    else other_count=catalog_offer(others,other_names,other_count,MAX_COUNT + 1,temporary,name);
+}
 /* A symbolic link or an unusable file does not stop the other effects. */
 static void offer_effect(const char *name, u32 n, void *context)
 {
-    (void)context;
     if(!catalog_name(name,n)) return;
-    char path[sizeof(root) + 13]; u32 prefix=length(root);
-    copy((u8 *)path,(const u8 *)root,prefix); path[prefix++]='/';
-    copy((u8 *)path+prefix,(const u8 *)name,n+1);
-    u32 size=read_effect(path,temporary);
-    if(size && valid_profile(temporary,size))
-        count=catalog_offer(profiles,names,count,MAX_COUNT,temporary,name);
+    char path[EFFECT_PATH_SIZE];
+    if(join(path,sizeof(path),(const char *)context,name)) offer_path(path,name);
 }
+static int discover_folder(const char *folder)
+{
+    long fd=syscall6(5,(u32)folder,0xc000,0,0,0,0);
+    if(fd==-2) return 0;
+    if(fd<0) return 30;
+    static const struct directory_calls calls={directory_read,directory_seek};
+    int status=directory_list(fd,directory_entries,sizeof(directory_entries),&calls,offer_effect,(void *)folder);
+    syscall6(6,fd,0,0,0,0,0);
+    return status;
+}
+/* The listed effects that `collect` could not copy into the library at this
+   power-on. They install from the inbox. */
+static char pending[NAMES_MAX][CATALOG_NAME_SIZE];
+static u32 pending_count;
+/* The effects of the library, and the pending effects of the inbox. At most
+   MAX_COUNT effects install: the effects of the package, then the other
+   effects with the smallest IDs. Each group keeps its smallest IDs.
+   `overflow` shows that some did not fit. */
 static int discover(void)
 {
-    count=0;
+    count=0; other_count=0; overflow=0;
 #if defined(GRKIT_NO_MODULES) || defined(GRKIT_NO_IMAGE_CONTROL)
     /* Without Image Control, the target has no use for effect files. */
     return 0;
 #endif
-    long fd=syscall6(5,(u32)root,0xc000,0,0,0,0);
-    if(fd==-2) return 0;
-    if(fd<0) return 30;
-    static const struct directory_calls calls={directory_read,directory_seek};
-    int status=directory_list(fd,directory_entries,sizeof(directory_entries),&calls,offer_effect,0);
-    syscall6(6,fd,0,0,0,0,0);
+    /* Without Image Control, no effect installs. INSTALL reports a selection
+       file that it cannot read. */
+    u32 selected;
+    if(!read_selection(&selected) && !(selected >> PLUGIN_IMAGE_CONTROL & 1)) return 0;
+    read_package_list();
+    int status=discover_folder(library_path);
+    for(u32 i=0;!status && i<pending_count;++i) {
+        char path[EFFECT_PATH_SIZE];
+        if(join(path,sizeof(path),inbox_path,pending[i])) offer_path(path,pending[i]);
+    }
+    if(count>MAX_COUNT) { count=MAX_COUNT; overflow=1; }
+    for(u32 i=0;i<other_count;++i) {
+        if(count==MAX_COUNT) { overflow=1; break; }
+        count=catalog_offer(profiles,names,count,MAX_COUNT,others[i],other_names[i]);
+    }
     return status;
 }
+#if !defined(GRKIT_NO_MODULES) && !defined(GRKIT_NO_IMAGE_CONTROL)
+static const char data_path[] = DATA_PATH;
+static const char index_path[] = INDEX_PATH;
+static const char imported_path[] = IMPORTED_PATH;
+/* Write `size` bytes to `path`, which the installer creates or truncates.
+   Return 1 on success. */
+static int write_file(const char *path, const u8 *data, u32 size)
+{
+    long fd=syscall6(5,(u32)path,0x241,0644,0,0,0);
+    if(fd<0) return 0;
+    u32 done=0;
+    while(done<size) {
+        long n=syscall6(4,fd,(u32)(data+done),size-done,0,0,0);
+        if(n<=0) break;
+        done+=(u32)n;
+    }
+    return syscall6(6,fd,0,0,0,0,0)>=0 && done==size;
+}
+static u8 existing[GRKIT_GRF_MAX_SIZE];
+static char inbox[NAMES_MAX][CATALOG_NAME_SIZE];
+static u32 inbox_count;
+static void inbox_name(const char *name, u32 n, void *context)
+{
+    (void)context;
+    if(catalog_name(name,n) && inbox_count<NAMES_MAX) catalog_copy_name(inbox[inbox_count++],name);
+}
+/* IMPORTED.TXT records the package that the library has: for each listed
+   inbox file, its name and the FNV-1a hash of its bytes. */
+#define IMPORTED_MAX (NAMES_MAX * 24U)
+static u8 record[IMPORTED_MAX], recorded[IMPORTED_MAX];
+static u32 record_line(u32 n, const char *name, u32 hash)
+{
+    u32 k=length(name);
+    if(n+k+11>IMPORTED_MAX) return n;
+    copy(record+n,(const u8 *)name,k); n+=k; record[n++]=' ';
+    for(int shift=28;shift>=0;shift-=4) record[n++]=(u8)"0123456789ABCDEF"[(hash>>shift)&15];
+    record[n++]='\r'; record[n++]='\n';
+    return n;
+}
+static u32 fnv(const u8 *data, u32 size)
+{
+    u32 hash=0x811c9dc5;
+    for(u32 i=0;i<size;++i) { hash^=data[i]; hash*=0x01000193; }
+    return hash;
+}
+/* Copy the effects of a new package into the library, where each replaces
+   the file with the same name. The package is new when the record of its
+   listed files differs from IMPORTED.TXT. The first power-on with the library
+   copies every valid inbox file: the inbox then holds the effects of an
+   earlier release. The installer deletes no file and renames none: on the
+   camera's Linux, a rename does not replace a file (on GR IV exFAT it fails
+   with an I/O error), and on GR IV exFAT a delete made later lookups fail,
+   also the request that runs INSTALL. So the inbox keeps its files, and a
+   copy of the same package does not bring back an effect that a person
+   deleted from the library. If the power fails during a copy, IMPORTED.TXT
+   stays old, and a later power-on copies again. */
+static void collect(void)
+{
+    pending_count=0;
+    read_package_list();
+    long dir=syscall6(5,(u32)library_path,0xc000,0,0,0,0);
+    int first=dir==-2;
+    if(dir>=0) syscall6(6,dir,0,0,0,0,0);
+    else if(!first) return;
+    u32 n=0;
+    for(u32 i=0;i<listed_count;++i) {
+        char from[EFFECT_PATH_SIZE];
+        if(!join(from,sizeof(from),inbox_path,listed[i])) continue;
+        u32 size=read_effect(from,temporary);
+        if(size && valid_profile(temporary,size)) n=record_line(n,listed[i],fnv(temporary,size));
+    }
+    long had=read_text(imported_path,recorded,sizeof(recorded));
+    if(!first && had==(long)n && equal(recorded,record,n)) return;
+    inbox_count=0;
+    if(first) {
+        long fd=syscall6(5,(u32)inbox_path,0xc000,0,0,0,0);
+        if(fd<0) return;
+        static const struct directory_calls calls={directory_read,directory_seek};
+        int status=directory_list(fd,directory_entries,sizeof(directory_entries),&calls,inbox_name,0);
+        syscall6(6,fd,0,0,0,0,0);
+        if(status) return;
+    } else {
+        for(u32 i=0;i<listed_count;++i) catalog_copy_name(inbox[inbox_count++],listed[i]);
+    }
+    long made=syscall6(39,(u32)data_path,0755,0,0,0,0);
+    if(made<0 && made!=-17) return;
+    made=syscall6(39,(u32)library_path,0755,0,0,0,0);
+    if(made<0 && made!=-17) return;
+    for(u32 i=0;i<inbox_count;++i) {
+        char from[EFFECT_PATH_SIZE], to[EFFECT_PATH_SIZE];
+        if(!join(from,sizeof(from),inbox_path,inbox[i]) || !join(to,sizeof(to),library_path,inbox[i]))
+            continue;
+        u32 size=read_effect(from,temporary);
+        if(!size || !valid_profile(temporary,size)) continue;
+        if(read_effect(to,existing)==size && equal(existing,temporary,size)) continue;
+        if(!write_file(to,temporary,size) && is_listed(inbox[i]) && pending_count<NAMES_MAX)
+            catalog_copy_name(pending[pending_count++],inbox[i]);
+    }
+    if(!pending_count) write_file(imported_path,record,n);
+}
+/* The effect name in a GRF record: up to 16 characters, NUL-terminated if
+   shorter. */
+#define GRF_NAME 48U
+#define GRF_NAME_SIZE 16U
+/* The list of the installed effects and their files, for a person who removes
+   an effect from the library. The installer writes it only when its text
+   changes. */
+#define INDEX_MAX 2048U
+static u8 index_text[INDEX_MAX], index_old[INDEX_MAX + 1];
+static u32 append(u32 n, const char *text)
+{
+    while(*text && n<INDEX_MAX) index_text[n++]=(u8)*text++;
+    return n;
+}
+static void write_index(void)
+{
+    u32 n=append(0,"GRKit installs these effects from GRKIT\\EFFECTS. To remove an effect, delete its file there.\r\n");
+    for(u32 i=0;i<count;++i) {
+        char name[GRF_NAME_SIZE + 1];
+        u32 k=0;
+        while(k<GRF_NAME_SIZE && profiles[i][GRF_NAME+k]) { name[k]=(char)profiles[i][GRF_NAME+k]; ++k; }
+        name[k]=0;
+        n=append(n,names[i]); n=append(n,"  "); n=append(n,name); n=append(n,"\r\n");
+    }
+    if(overflow)
+        n=append(n,"GRKIT\\EFFECTS has more effects than GRKit can install. Delete the files of the effects that you do not use.\r\n");
+    long fd=syscall6(5,(u32)index_path,0x8800,0,0,0,0);
+    if(fd>=0) {
+        u32 have=0; long got;
+        while(have<sizeof(index_old) &&
+              (got=syscall6(3,fd,(u32)(index_old+have),sizeof(index_old)-have,0,0,0))>0) have+=(u32)got;
+        syscall6(6,fd,0,0,0,0,0);
+        if(have==n && equal(index_old,index_text,n)) return;
+    } else if(!count) return;
+    /* On GR IV exFAT, a rename that replaced this file made the later
+       requests of the camera fail, also when the installer deleted the file
+       first. The list only informs a person, so the installer rewrites it in
+       place. If the power fails, the next power-on writes it again, because
+       its text differs. */
+    fd=syscall6(5,(u32)index_path,0x241,0644,0,0,0);
+    if(fd<0) return;
+    syscall6(4,fd,(u32)index_text,n,0,0,0);
+    syscall6(6,fd,0,0,0,0,0);
+}
+#else
+static void collect(void) {}
+static void write_index(void) {}
+#endif
 /* Photos record this code as their Image Control tag. It stays stable across
    catalogs and outside the native values 256..267. */
 #ifdef GRKIT_NATIVE_TONE_PAGE
@@ -258,18 +493,31 @@ static u32 chunk_count(u32 chunk)
 }
 static int scan(void)
 {
+    /* An earlier attempt of this power-on wrote the plan: the loader deletes
+       it at power-on. A second plan would replace it in a rename, which the
+       camera's Linux does not do. */
+    long fd = syscall6(5, (u32)plan_path, 0x8800, 0, 0, 0, 0);
+    if (fd >= 0) { syscall6(6, fd, 0, 0, 0, 0, 0); return 0; }
+    /* O_EXCL: the loader resends SCAN until a plan appears, so attempts can
+       overlap. Only the attempt that creates the temporary plan moves the
+       inbox and lists the effects. */
+    fd = syscall6(5, (u32)plan_tmp, 0xc1, 0600, 0, 0, 0);
+    if (fd == -17) return 3;
+    if (fd < 0) return 36;
+    collect();
     int status = discover();
-    if (status) return status;
+    if (status) {
+        syscall6(6, fd, 0, 0, 0, 0, 0);
+        syscall6(10, (u32)plan_tmp, 0, 0, 0, 0, 0);
+        return status;
+    }
+    write_index();
     layout();
     put32(plan, 0x314d5247); put32(plan + 4, count);
     put32(plan + 8, size / 4); put32(plan + 12, icon_chunks);
     put32(plan + 16, 20 + count * GRKIT_GRF_MAX_SIZE);
     for (u32 i = 0; i < count; ++i)
         copy(plan + 20 + i * GRKIT_GRF_MAX_SIZE, profiles[i], GRKIT_GRF_MAX_SIZE);
-    /* O_EXCL: the loader resends SCAN until a plan appears, so attempts can overlap. */
-    long fd = syscall6(5, (u32)plan_tmp, 0xc1, 0600, 0, 0, 0);
-    if (fd == -17) return 3;
-    if (fd < 0) return 36;
     u32 done = 0, total = 20 + count * GRKIT_GRF_MAX_SIZE;
     while (done < total) {
         long n = syscall6(4, fd, (u32)(plan + done), total - done, 0, 0, 0);
@@ -364,10 +612,35 @@ static int relocate(void)
     return 0;
 }
 #endif
+/* SCAN wrote the plan at this power-on, and the loader allocated the arrays
+   for it. INSTALL takes the effects from the plan, so that both steps install
+   the same effects. */
+static int read_plan(void)
+{
+    u32 have = 0; long got = 0; u8 extra;
+    long fd = syscall6(5, (u32)plan_path, 0x8800, 0, 0, 0, 0);
+    if (fd < 0) return 37;
+    while (have < sizeof(plan)) {
+        got = syscall6(3, fd, (u32)(plan + have), sizeof(plan) - have, 0, 0, 0);
+        if (got <= 0) break;
+        have += (u32)got;
+    }
+    if (have == sizeof(plan)) got = syscall6(3, fd, (u32)&extra, 1, 0, 0, 0);
+    syscall6(6, fd, 0, 0, 0, 0, 0);
+    if (got < 0 || (have == sizeof(plan) && got) || have < 20 || get32(plan) != 0x314d5247) return 37;
+    count = get32(plan + 4);
+    if (count > MAX_COUNT || have != 20 + count * GRKIT_GRF_MAX_SIZE || get32(plan + 16) != have) return 37;
+    for (u32 i = 0; i < count; ++i) {
+        copy(profiles[i], plan + 20 + i * GRKIT_GRF_MAX_SIZE, GRKIT_GRF_MAX_SIZE);
+        u32 bytes = get32(profiles[i] + 8);
+        if ((bytes != GRKIT_GRF_SIZE && bytes != GRKIT_GRF_MAX_SIZE) || !valid_profile(profiles[i], bytes)) return 37;
+    }
+    return 0;
+}
 static int install(void)
 {
     u32 selected;
-    int status = discover();
+    int status = read_plan();
     if (status) return status;
     if ((status = read_selection(&selected))) return status;
     /* A plugin that needs effects has nothing to show without them. */
@@ -376,11 +649,7 @@ static int install(void)
     for (u32 i = 0; i < PLUGIN_COUNT; ++i)
         if (selected >> i & 1) needed_points |= plugin_points[i];
     layout();
-    if (!read_file(plan_path, plan, 20 + count * GRKIT_GRF_MAX_SIZE) || get32(plan) != 0x314d5247 ||
-        get32(plan + 4) != count || get32(plan + 8) != size / 4 ||
-        get32(plan + 12) != icon_chunks || get32(plan + 16) != 20 + count * GRKIT_GRF_MAX_SIZE) return 37;
-    for (u32 i = 0; i < count; ++i)
-        if (!equal(plan + 20 + i * GRKIT_GRF_MAX_SIZE, profiles[i], GRKIT_GRF_MAX_SIZE)) return 37;
+    if (get32(plan + 8) != size / 4 || get32(plan + 12) != icon_chunks) return 37;
 #ifdef GRKIT_RELOCATE
     if ((status = relocate())) return status;
 #endif

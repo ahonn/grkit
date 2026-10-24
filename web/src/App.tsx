@@ -419,6 +419,9 @@ export function App() {
               </li>
             ))}
           </ol>
+          <p className="note">
+            <RichText parts={t.updateNote} />
+          </p>
         </section>
 
         <section className="section" aria-labelledby="remove-label">

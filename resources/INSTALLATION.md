@@ -16,6 +16,14 @@ Step 3 turns on the camera's SD scripts. The camera shows Mode Set Command, then
 If the SD scripts are already on, skip step 3.
 After the installation, you can remove `00078350.588` and `DEVELOP.MOD` from the card root. This step is optional.
 
+## Update
+
+1. Turn the camera off.
+2. Copy the contents of `SD_ROOT` of the new package to the root of the SD card. Replace or merge the existing files.
+3. Turn the camera on normally.
+
+GRKit keeps your settings and effects in the `GRKIT` folder, so the update keeps them. You do not need to delete `SCRIPT` first. If you update from GRKit 1.2 or earlier and replace the `SCRIPT` folder, for example with the default Replace of macOS Finder, the earlier settings and the effects that the new package does not have are lost, because GRKit 1.2 kept them in `SCRIPT`.
+
 ## Use
 
 Open ADJ and select the sixth entry, GRK. GRKit loads a few seconds after power-on, so the entry can appear late. When GRKit has loaded, the shooting screen shows **GRKit** at the top for a few seconds. This label needs the Framing or Guides module.
@@ -33,6 +41,8 @@ Photo: [Snow in Akihabara](https://www.flickr.com/photos/cafetricot/51803682755/
 Highlight the last row, GRK, to see the GRKit version.
 
 Press MENU to go back one level. GRKit keeps your settings after power-off.
+
+GRKit keeps the effects in the `GRKIT/EFFECTS` folder of the card. A new package adds its effects and replaces their earlier versions. It does not remove other effects. To remove an effect, turn the camera off and delete its file from `GRKIT/EFFECTS`. A later package adds it again only when its file in the package changes. `GRKIT/EFFECTS.TXT` lists the file of each effect. GRKit installs at most 20 effects: first those of the last package, then the others.
 
 ## Troubleshooting
 
@@ -56,7 +66,7 @@ The card root has a firmware update file. Turn the camera off. Remove each `.bin
 
 ## Remove or recover
 
-To remove GRKit, turn the camera off. Then delete the `SCRIPT` folder from the card.
+To remove GRKit, turn the camera off. Then delete the `SCRIPT` and `GRKIT` folders from the card. `GRKIT` holds your GRKit settings.
 
 The SD script setting stays on. To turn it off:
 

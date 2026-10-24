@@ -64,8 +64,8 @@ GR IV has its own layout and all plugins.
 
 At power-on, the loader script waits until Linux mounts the card. Then it runs two steps:
 
-1. SCAN selects the effects and writes an allocation plan. The startup script allocates the arrays and stays resident, so the arrays stay allocated.
-2. INSTALL writes records and icons, publishes the code, and installs the hooks last. It writes `INSTALL.OK`, or `INSTALL.ERR` with a status.
+1. SCAN moves the effects of the package into the effects library, selects the effects, and writes an allocation plan that holds them. The startup script allocates the arrays and stays resident, so the arrays stay allocated.
+2. INSTALL writes the records of the planned effects and the icons, publishes the code, and installs the hooks last. It writes `INSTALL.OK`, or `INSTALL.ERR` with a status.
 
 A camera has one package. When the camera has several targets, the package holds the installer of each, and `INSTALL.SH` selects one at each power-on: first by the identity word of the running build, then by [relocation](#relocation) for a build that no target names (`runtime::package_runtime_files`).
 
@@ -73,10 +73,17 @@ INSTALL changes nothing on a firmware that it does not expect. Each firmware add
 
 Each hook belongs to one extension point. INSTALL installs only the points of the selected plugins, so a plugin that is not selected changes no firmware.
 `SCRIPT/PLUGINS/PLUGINS.TXT` selects the plugins.
+Each package has `PLUGINS.TXT` and `PACKAGE.TXT`, also when it selects every plugin or has no effects, and the other package files have the same names in each release. A copy of a new package over an old one, by replace or by merge, therefore leaves the files of the new package in `SCRIPT`, and the data folder keeps the settings and the effects. An update needs no delete step.
+
+The effects library is `GRKIT/EFFECTS`, in the data folder. The package brings its effects in `SCRIPT/PLUGINS/EFFECTS`, the inbox, and lists their files in `SCRIPT/PLUGINS/PACKAGE.TXT`. When a package is new, SCAN copies its listed effects into the library, where each replaces the file with the same name. `GRKIT/IMPORTED.TXT` records the package that the library has, with a hash of each file. So a copy of the same package changes nothing, and an effect that a person deleted from the library stays deleted until a package with a different file brings it. The first power-on with the library copies every valid inbox file, because releases before the library kept the effects there. The installer deletes and renames no file in these folders: on the camera's Linux a rename does not replace a file, and on GR IV exFAT a delete made later lookups fail. Without Image Control in the selection, no effect installs.
+GRKit installs the effects of the library, at most 20. The effects of the last package come first, and each package has the list. The other effects fill the remaining places in ID order. A listed effect that SCAN could not copy installs from the inbox. INSTALL takes the effects from the plan that SCAN wrote, so both steps install the same effects. SCAN writes `GRKIT/EFFECTS.TXT`, the list of the installed effects and their files, when the list changes.
 
 `grkit_core::abi` defines the shared header, the effect records, and the picture scratch. It generates `runtime/abi.h`.
 
-The resident loader saves the plugin selections and the Fn adjustments in `SCRIPT/PLUGINS/STATE.TXT`. It writes only after a change, and only through the camera's own file system.
+The resident loader saves the plugin selections and the Fn adjustments in `GRKIT/STATE.TXT`. It writes only after a change, and only through the camera's own file system.
+`GRKIT` is the data folder of GRKit, outside `SCRIPT`. No package holds it, so a copy of a new package never replaces the settings. The loader creates it.
+Each plugin names its state file (`plugins::StateFile`). The loader restores the files in a fixed order and keeps a key with the value 0 out of the file.
+Releases before the data folder kept the state in `SCRIPT/PLUGINS`. The loader reads those files when the data folder has none, saves the values in the data folder at once, and then deletes the old files.
 A script error frees the arrays that the hooks use, so the resident script checks each array index and divides only by constants.
 
 ## Plugins

@@ -64,7 +64,8 @@ GR III 2.20 和 GR IIIx 1.70 使用与 2.10 和 1.60 相同的包。GR IV 1.11 �
 - [GR III、GR IIIx 及其 HDF 机型](resources/INSTALLATION.zh-Hans.md)
 - [GR IV、GR IV HDF 和 GR IV Monochrome](resources/INSTALLATION-GR4.zh-Hans.md)
 
-要移除 GRKit，请先关闭相机，再删除存储卡中的 `SCRIPT` 文件夹。
+要更新 GRKit，把新安装包中 `SD_ROOT` 的内容复制到存储卡，覆盖旧文件。设置和效果保存在 `GRKIT` 中，不会丢失。
+要移除 GRKit，请先关闭相机，再删除存储卡中的 `SCRIPT` 和 `GRKIT` 文件夹。`GRKIT` 保存 GRKit 的设置。
 要关闭 SD 脚本设置，请使用 [grkit.app](https://grkit.app) 安装步骤下方提供的文件。具体步骤见安装指南。
 
 ## 从源码构建

@@ -1,6 +1,6 @@
 # Image Control effects
 
-Each directory with an `effect.json` defines one effect. The directory name is the stable effect ID. The site and the release packages publish every effect in this directory. [NOTICE.md](NOTICE.md) gives the source and the license of each effect.
+Each directory with an `effect.json` defines one effect. The directory name is the stable effect ID. The camera keeps the selected effect and its Fn adjustments by this ID. A refit keeps the ID. Give an effect a new ID only when its look changes so much that it is no longer the same effect. Its saved settings then reset. The site and the release packages publish every effect in this directory. [NOTICE.md](NOTICE.md) gives the source and the license of each effect.
 
 Effects run in the camera's processing, not on the JPEG: the matrix acts before the Standard base gamma, and the curves and `post_matrix` act after it. Effects add no grain or glow.
 

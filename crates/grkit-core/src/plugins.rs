@@ -83,7 +83,28 @@ pub enum Slot {
     Own(usize),
 }
 
-/// A value that `STATE.TXT` keeps across power-off.
+/// A state file of the resident loader in `runtime::DATA_FOLDER`. The loader
+/// restores the files in the order of `ALL`, so the settings of the main file
+/// apply first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StateFile {
+    /// The selections of the plugins and the Fn adjustments of the effects.
+    Main,
+}
+
+impl StateFile {
+    pub const ALL: [StateFile; 1] = [StateFile::Main];
+
+    /// The file name without its extension. The file is `<stem>.TXT`, and the
+    /// loader writes `<stem>.TMP` before it replaces the file.
+    pub fn stem(self) -> &'static str {
+        match self {
+            Self::Main => "STATE",
+        }
+    }
+}
+
+/// A value that a state file keeps across power-off.
 pub struct StateKey {
     /// The key name. The file names it `<plugin id>.<name>`.
     pub name: &'static str,
@@ -126,6 +147,8 @@ pub struct Plugin {
     /// The plugin's own header words.
     pub words: &'static [Word],
     pub state: &'static [StateKey],
+    /// The state file that keeps the keys of `state`.
+    pub state_file: StateFile,
     /// The number of artwork tiles. Tile 0 is the root tile of the page.
     pub tiles: usize,
     /// The artwork tiles, 40 x 40 RGBA each.
@@ -175,6 +198,7 @@ pub const PLUGINS: [Plugin; 5] = [
         points: &[Point::MenuPage, Point::Tuning, Point::PictureEncode],
         needs_effects: true,
         words: &[],
+        state_file: StateFile::Main,
         state: &[StateKey {
             name: "effect",
             slot: Slot::Effect,
@@ -199,6 +223,7 @@ pub const PLUGINS: [Plugin; 5] = [
         ],
         needs_effects: false,
         words: &[],
+        state_file: StateFile::Main,
         state: &[StateKey {
             name: "ratio",
             slot: Slot::Core(HOST_FRAME_RATIO),
@@ -229,6 +254,7 @@ pub const PLUGINS: [Plugin; 5] = [
         points: &[Point::MenuPage, Point::ViewfinderOverlay],
         needs_effects: false,
         words: &[],
+        state_file: StateFile::Main,
         state: &[StateKey {
             name: "style",
             slot: Slot::Core(HOST_GUIDE),
@@ -254,6 +280,7 @@ pub const PLUGINS: [Plugin; 5] = [
             doc: "Date Imprint look: 0 classic seven-segment digits, 1 GR1s dot-matrix \
                   digits, 2 GR II digits.",
         }],
+        state_file: StateFile::Main,
         state: &[
             StateKey {
                 name: "style",
@@ -286,6 +313,7 @@ pub const PLUGINS: [Plugin; 5] = [
             doc: "Grain level: 0 Off, 1 weak, 2 medium, 3 strong. The native grain \
                   stage of recorded pictures uses it instead of the native grain settings.",
         }],
+        state_file: StateFile::Main,
         state: &[StateKey {
             name: "level",
             slot: Slot::Own(0),
@@ -383,6 +411,7 @@ pub struct StateEntry {
     pub max: u32,
     /// The bit of the plugin in `GRKIT_HOST_PLUGINS`.
     pub plugin: u32,
+    pub file: StateFile,
 }
 
 /// The state keys of all plugins, in menu order.
@@ -400,6 +429,7 @@ pub fn state_keys() -> Vec<StateEntry> {
                 },
                 max: key.max,
                 plugin: index as u32,
+                file: plugin.state_file,
             })
         })
         .collect()

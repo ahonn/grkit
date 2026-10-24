@@ -359,6 +359,12 @@ pub fn load_runtime(manifest: &[u8], files: &Files) -> Result<VerifiedRuntime> {
     })
 }
 
+/// The list of the effect files of a package. When the effects library on the
+/// card has more effects than the camera installs, the effects of the last
+/// package install first. Each package has the list, also an empty one, so a
+/// copy of a new package over an old one always replaces it.
+pub const EFFECT_LIST: &str = "SCRIPT/PLUGINS/PACKAGE.TXT";
+
 /// The compiled effects of a package, each under its package filename (`effects::filename`).
 #[derive(Clone, Debug, Default)]
 pub struct EffectSet {
@@ -384,6 +390,19 @@ impl EffectSet {
         self.files.insert(name, blob);
         Ok(id)
     }
+
+    /// The contents of `EFFECT_LIST`: one effect filename for each line.
+    pub fn list(&self) -> Vec<u8> {
+        effect_list(self.files.keys())
+    }
+}
+
+fn effect_list<'a>(names: impl IntoIterator<Item = &'a String>) -> Vec<u8> {
+    names
+        .into_iter()
+        .map(|name| format!("{name}\n"))
+        .collect::<String>()
+        .into_bytes()
 }
 
 fn is_effect_path(name: &str) -> bool {
@@ -596,6 +615,8 @@ pub fn validate_contents(contents: &Files) -> Result<Contents> {
         .collect();
     let targets = package_targets(&runtime, camera)?;
     let mut ids = BTreeSet::new();
+    let mut effect_names = Vec::new();
+    let mut list = None;
     let mut plugins = Selection::ALL;
     let mut language = None;
     let plugins_path = format!("SD_ROOT/{}", modules::PATH);
@@ -610,6 +631,9 @@ pub fn validate_contents(contents: &Files) -> Result<Contents> {
                 "Profile filename does not match its stable ID"
             );
             ensure!(ids.insert(id), "Duplicate effect ID");
+            effect_names.push(name.rsplit('/').next().unwrap_or_default().to_owned());
+        } else if *name == format!("SD_ROOT/{EFFECT_LIST}") {
+            list = Some(blob);
         } else if *name == plugins_path {
             plugins = Selection::parse(blob)?;
         } else if let Some(guide) = Language::ALL
@@ -626,6 +650,11 @@ pub fn validate_contents(contents: &Files) -> Result<Contents> {
     ensure!(
         ids.len() <= runtime::MAX_COUNT,
         "Target effect capacity exceeded"
+    );
+    // Packages before the effects library have no list.
+    ensure!(
+        list.is_none_or(|list| *list == effect_list(&effect_names)),
+        "{EFFECT_LIST} must list the effect files of the package"
     );
     ensure!(
         camera.effects || ids.is_empty(),
@@ -748,9 +777,8 @@ pub fn assemble(
             blob.clone(),
         );
     }
-    if let Some(file) = plugins.file() {
-        contents.insert(format!("SD_ROOT/{}", modules::PATH), file);
-    }
+    contents.insert(format!("SD_ROOT/{EFFECT_LIST}"), effects.list());
+    contents.insert(format!("SD_ROOT/{}", modules::PATH), plugins.file());
     check_guide(guide.pdf)?;
     contents.insert(guide.language.guide_path(), guide.pdf.to_vec());
     contents.insert("LICENSES.md".into(), LICENSES.as_bytes().to_vec());

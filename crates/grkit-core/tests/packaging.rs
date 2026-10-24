@@ -288,7 +288,8 @@ fn selected_plugins_are_packaged_and_verified() {
         verify_package(&bytes).unwrap().plugins.names(),
         ["image-control", "date-stamp"]
     );
-    // A package with every plugin has no file and keeps its earlier bytes.
+    // A package with every plugin has the file too, so a copy over an older
+    // package always replaces its selection.
     let plain = assemble(
         &[runtime()],
         &effects,
@@ -298,7 +299,10 @@ fn selected_plugins_are_packaged_and_verified() {
     )
     .unwrap()
     .bytes;
-    assert!(!unpack(&plain).contains_key("SD_ROOT/SCRIPT/PLUGINS/PLUGINS.TXT"));
+    assert_eq!(
+        unpack(&plain)["SD_ROOT/SCRIPT/PLUGINS/PLUGINS.TXT"],
+        Selection::ALL.file()
+    );
     assert_eq!(
         verify_package(&plain).unwrap().plugins.names(),
         grkit_core::modules::NAMES
@@ -968,4 +972,39 @@ fn files_of(bytes: &[u8]) -> Files {
     let mut files = unpack(bytes);
     files.remove("SHA256SUMS");
     files
+}
+
+/// The effect list names the effect files of the package, so their effects
+/// install before others that an earlier package left in the library.
+#[test]
+fn packages_list_their_effect_files() {
+    let files = unpack(&package());
+    let list = format!("SD_ROOT/{EFFECT_LIST}");
+    let effects: Vec<_> = files
+        .keys()
+        .filter_map(|name| name.strip_prefix("SD_ROOT/SCRIPT/PLUGINS/EFFECTS/"))
+        .map(|name| format!("{name}\n"))
+        .collect();
+    assert_eq!(effects.len(), 1);
+    assert_eq!(files[&list], effects.concat().into_bytes());
+    // A package without effects has an empty list.
+    let none = assemble(
+        &[runtime()],
+        &EffectSet::default(),
+        Selection::ALL.without("image-control").unwrap(),
+        &camera::GR3,
+        &english(),
+    )
+    .unwrap();
+    assert_eq!(unpack(&none.bytes)[&list], b"");
+    // A list that differs from the effects is rejected. A package from before
+    // the effects library has no list.
+    for wrong in [b"".as_slice(), b"00000000.GRF\n"] {
+        let mut changed = files.clone();
+        changed.insert(list.clone(), wrong.to_vec());
+        assert!(validate_contents(&with_sums(changed)).is_err());
+    }
+    let mut legacy = files.clone();
+    legacy.remove(&list);
+    assert!(validate_contents(&with_sums(legacy)).is_ok());
 }

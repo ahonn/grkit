@@ -7,7 +7,8 @@ use anyhow::{ensure, Context, Result};
 use grkit_core::{
     artwork::{off_pixels, plugins_pixels, version_pixels},
     runtime::{
-        icon_stride, HOST_ICON_COUNT, ICONS_PER_CHUNK, LINUX_DIRECTORY, MAX_CHUNKS, MAX_COUNT,
+        icon_stride, HOST_ICON_COUNT, ICONS_PER_CHUNK, LINUX_DATA_DIRECTORY, LINUX_DIRECTORY,
+        MAX_CHUNKS, MAX_COUNT,
     },
 };
 use std::fmt::Write;
@@ -160,19 +161,26 @@ pub fn header(plan: &PatchPlan, body: &FirmwareImage, version: &str) -> Result<S
             target.identities.iter().copied(),
         );
     }
-    for (name, suffix) in [
-        ("EFFECTS_PATH", "EFFECTS"),
-        ("PLAN_PATH", "MODULE.BIN"),
-        ("PLAN_TMP_PATH", "MODULE.TMP"),
-        ("LOCK_PATH", "INSTALL.LCK"),
-        ("DONE_PATH", "INSTALL.OK"),
-        ("FAILED_PATH", "INSTALL.ERR"),
-        ("PLUGINS_PATH", "PLUGINS.TXT"),
-    ] {
+    // The effects folder of the package is the inbox of the effects library.
+    let paths = [
+        ("INBOX_PATH", LINUX_DIRECTORY, "/EFFECTS"),
+        ("PLAN_PATH", LINUX_DIRECTORY, "/MODULE.BIN"),
+        ("PLAN_TMP_PATH", LINUX_DIRECTORY, "/MODULE.TMP"),
+        ("LOCK_PATH", LINUX_DIRECTORY, "/INSTALL.LCK"),
+        ("DONE_PATH", LINUX_DIRECTORY, "/INSTALL.OK"),
+        ("FAILED_PATH", LINUX_DIRECTORY, "/INSTALL.ERR"),
+        ("PLUGINS_PATH", LINUX_DIRECTORY, "/PLUGINS.TXT"),
+        ("PACKAGE_PATH", LINUX_DIRECTORY, "/PACKAGE.TXT"),
+        ("DATA_PATH", LINUX_DATA_DIRECTORY, ""),
+        ("LIBRARY_PATH", LINUX_DATA_DIRECTORY, "/EFFECTS"),
+        ("INDEX_PATH", LINUX_DATA_DIRECTORY, "/EFFECTS.TXT"),
+        ("IMPORTED_PATH", LINUX_DATA_DIRECTORY, "/IMPORTED.TXT"),
+    ];
+    for (name, directory, suffix) in paths {
         writeln!(
             result,
             "#define {name} {}",
-            serde_json::to_string(&format!("{LINUX_DIRECTORY}/{suffix}"))?
+            serde_json::to_string(&format!("{directory}{suffix}"))?
         )?;
     }
     if modules {

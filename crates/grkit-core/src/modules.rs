@@ -61,16 +61,15 @@ impl Selection {
         Self::from_names(names)
     }
 
-    /// The contents of `PLUGINS.TXT`, one name for each line, or `None` when
-    /// every plugin is selected. A package then omits the file.
-    pub fn file(self) -> Option<Vec<u8>> {
-        (self != Self::ALL).then(|| {
-            self.names()
-                .iter()
-                .map(|name| format!("{name}\n"))
-                .collect::<String>()
-                .into_bytes()
-        })
+    /// The contents of `PLUGINS.TXT`, one name for each line. Each package has
+    /// the file, also with every plugin selected, so a copy of a new package
+    /// over an old one always replaces the old selection.
+    pub fn file(self) -> Vec<u8> {
+        self.names()
+            .iter()
+            .map(|name| format!("{name}\n"))
+            .collect::<String>()
+            .into_bytes()
     }
 
     /// The selected plugin names, in menu order.
@@ -111,12 +110,14 @@ mod tests {
     #[test]
     fn a_missing_file_selects_everything_and_an_empty_file_nothing() {
         assert_eq!(Selection::default(), Selection::ALL);
-        assert_eq!(Selection::ALL.file(), None);
+        let all = Selection::ALL.file();
+        assert_eq!(Selection::parse(&all).unwrap(), Selection::ALL);
+        assert!(all.ends_with(b"\n"));
         assert_eq!(Selection::parse(b"").unwrap(), Selection::NONE);
-        assert_eq!(Selection::NONE.file(), Some(Vec::new()));
+        assert_eq!(Selection::NONE.file(), Vec::<u8>::new());
         let selection = Selection::parse(b" grain\r\nframing\t").unwrap();
         assert_eq!(selection.names(), ["framing", "grain"]);
-        assert_eq!(selection.file().unwrap(), b"framing\ngrain\n");
+        assert_eq!(selection.file(), b"framing\ngrain\n");
         assert_eq!(selection.mask(), 0b10010);
         assert!(Selection::parse(b"framing framing").is_err());
         assert!(Selection::parse(b"hdr").is_err());

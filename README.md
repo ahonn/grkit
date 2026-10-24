@@ -64,7 +64,8 @@ Each package contains the installation guide for its camera as a PDF, in the lan
 - [GR III, GR IIIx, and their HDF models](resources/INSTALLATION.md)
 - [GR IV, GR IV HDF, and GR IV Monochrome](resources/INSTALLATION-GR4.md)
 
-To remove GRKit, turn the camera off and delete the `SCRIPT` folder from the card.
+To update GRKit, copy the contents of `SD_ROOT` of the new package over the old files. Your settings and effects stay in `GRKIT`.
+To remove GRKit, turn the camera off and delete the `SCRIPT` and `GRKIT` folders from the card. `GRKIT` holds your GRKit settings.
 To turn the SD script setting off, use the files that [grkit.app](https://grkit.app) gives below the installation steps. The installation guide gives the steps.
 
 ## Build from source

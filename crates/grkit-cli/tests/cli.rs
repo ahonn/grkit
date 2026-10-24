@@ -266,8 +266,9 @@ fn package_roundtrip_and_output_ownership() {
         text(&zip),
     ];
     let packaged = success(&args);
-    // Ten runtime and document entries, then one per effect.
-    assert_eq!(packaged["entries"], 10 + source_count());
+    // Twelve runtime, selection, effect list, and document entries, then one
+    // per effect.
+    assert_eq!(packaged["entries"], 12 + source_count());
     assert_eq!(success(&["verify", text(&zip)])["effects"], source_count());
     let before = fs::read(&zip).unwrap();
     assert!(!run(&args).status.success());
@@ -375,8 +376,8 @@ fn package_selects_plugins_and_may_omit_effects() {
         "--out",
         text(&zip),
     ]);
-    // The plugin file is one more entry.
-    assert_eq!(packaged["entries"], 11 + source_count());
+    // Each package has the plugin file, so the count is the same.
+    assert_eq!(packaged["entries"], 12 + source_count());
     assert_eq!(
         packaged["plugins"],
         json!(["image-control", "framing", "grain"])
@@ -400,7 +401,8 @@ fn package_selects_plugins_and_may_omit_effects() {
         "--out",
         text(&framing_only),
     ]);
-    assert_eq!(packaged["entries"], 11);
+    // The entries include an empty effect list.
+    assert_eq!(packaged["entries"], 12);
     assert_eq!(success(&["verify", text(&framing_only)])["effects"], 0);
     for plugins in ["image-control", "hdr", "guides,guides"] {
         let rejected = tmp.path().join("rejected.zip");

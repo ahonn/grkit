@@ -272,6 +272,7 @@ export function EffectsSection({
           </button>
         </div>
       </div>
+      <p className="note">{t.libraryNote}</p>
 
       <div className="table-box">
         <table>
